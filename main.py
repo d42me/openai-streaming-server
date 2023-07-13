@@ -6,13 +6,32 @@ import openai
 import os
 from os.path import join, dirname
 from dotenv import load_dotenv
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
+
+class CORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next) -> Response:
+        # preflight request
+        if request.method == 'OPTIONS' and 'Access-Control-Request-Method' in request.headers:
+            response = Response()
+        else:
+            response = await call_next(request)
+        
+        host, port = (request.url.netloc.split(":") + [None])[:2]
+        if host in ['localhost', '127.0.0.1']:
+            response.headers['Access-Control-Allow-Origin'] = f'{request.url.scheme}://{host}:{port or ""}'
+            response.headers['Access-Control-Allow-Methods'] = '*'
+            response.headers['Access-Control-Allow-Headers'] = '*'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return response
+    
 dotenv_path = join(dirname(__file__), '.env')
 load_dotenv(dotenv_path)
 
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-system_prompt: str = "You are a helpful, creative, clever, and very friendly assistant and answer all questions of the visionOS user.",
+system_prompt: str = "You are a helpful, creative, clever, and very friendly assistant and answer all questions of the user.",
 
 async def requestOpenAICompletion(prompt):
     messages = [
@@ -39,7 +58,7 @@ async def requestOpenAICompletion(prompt):
             yield f"data: {chunk_message['content']}\n\n"
 
 async def sse(request):
-    query_param = request.query_params.get("q", "What can you do for me?")
+    query_param = request.query_params.get("q")
     generator = requestOpenAICompletion(query_param)
     return EventSourceResponse(generator)
 
@@ -48,6 +67,8 @@ routes = [
 ]
 
 app = Starlette(debug=True, routes=routes)
+
+app.add_middleware(CORSMiddleware)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level='info')
